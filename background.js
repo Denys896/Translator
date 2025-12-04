@@ -140,7 +140,7 @@ Format your response as:
             content: `Please translate and explain this text: "${data.text}"`
           }
         ],
-        max_tokens: 500,
+        max_tokens: 2000,
         temperature: 0.7
       }),
       signal: controller.signal

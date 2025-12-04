@@ -46,7 +46,7 @@
       
       var text = sel.toString().trim();
       
-      if (text.length > 0 && text.length < 500) {
+      if (text.length > 0 && text.length < 7000) {
         showButton(e.pageX, e.pageY, text);
       } else if (popup && !popup.contains(e.target)) {
         hideAll();
