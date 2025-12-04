@@ -1,47 +1,6 @@
 // Service Worker initialization
 console.log('Text Translator: Background service worker started');
 
-// Analytics tracking
-const analytics = {
-  usageCount: 0,
-  totalLatency: 0,
-  requestCount: 0,
-  errors: 0,
-  successes: 0
-};
-
-// Load analytics from storage on startup
-chrome.storage.local.get(['analytics'], (result) => {
-  if (result.analytics) {
-    Object.assign(analytics, result.analytics);
-    console.log('Text Translator: Analytics loaded', analytics);
-  }
-});
-
-// Save analytics periodically
-function saveAnalytics() {
-  chrome.storage.local.set({ analytics }, () => {
-    if (chrome.runtime.lastError) {
-      console.error('Text Translator: Failed to save analytics:', chrome.runtime.lastError);
-    }
-  });
-}
-
-// Track usage
-function trackUsage(type, latency, success) {
-  analytics.usageCount++;
-  analytics.requestCount++;
-  if (latency) {
-    analytics.totalLatency += latency;
-  }
-  if (success) {
-    analytics.successes++;
-  } else {
-    analytics.errors++;
-  }
-  saveAnalytics();
-}
-
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Text Translator Background: Received message', request.action);
@@ -49,11 +8,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'translateAndExplain') {
     handleTranslateAndExplain(request.data, sendResponse);
     return true; // Keep channel open for async response
-  } else if (request.action === 'getAnalytics') {
-    sendResponse({ analytics });
-    return false;
   } else if (request.action === 'ping') {
     sendResponse({ status: 'ok' });
+    return false;
+  } else if (request.action === 'logMetric') {
+    // Send metrics to dashboard
+    logMetricToDashboard(request.data);
+    sendResponse({ success: true });
     return false;
   }
   
@@ -66,11 +27,12 @@ async function handleTranslateAndExplain(data, sendResponse) {
   
   try {
     // Get API key and settings from storage
-    const result = await chrome.storage.local.get(['openaiApiKey', 'targetLanguage', 'subscriptionTier']);
+    const result = await chrome.storage.local.get(['openaiApiKey', 'targetLanguage', 'subscriptionTier', 'extensionUserId']);
     
     const apiKey = result.openaiApiKey;
     const targetLanguage = result.targetLanguage || 'English';
     const tier = result.subscriptionTier || 'free';
+    const userId = result.extensionUserId || 'anonymous';
     
     console.log('Text Translator Background: Settings loaded', {
       hasApiKey: !!apiKey,
@@ -83,7 +45,7 @@ async function handleTranslateAndExplain(data, sendResponse) {
       sendResponse({ 
         error: 'Please set your OpenAI API key in the extension popup first.' 
       });
-      trackUsage('translate', Date.now() - startTime, false);
+      logMetricToDashboard({ type: 'error', userId, latency: Date.now() - startTime });
       return;
     }
 
@@ -102,7 +64,7 @@ async function handleTranslateAndExplain(data, sendResponse) {
       sendResponse({ 
         error: `Daily limit reached (${limits.free} translations). Upgrade to Premium for unlimited access.` 
       });
-      trackUsage('translate', Date.now() - startTime, false);
+      logMetricToDashboard({ type: 'error', userId, latency: Date.now() - startTime });
       return;
     }
 
@@ -177,7 +139,8 @@ Format your response as:
     // Increment daily usage
     await incrementDailyUsage();
     
-    trackUsage('translate', latency, true);
+    // Log success metric to dashboard
+    logMetricToDashboard({ type: 'success', userId, latency });
     
     sendResponse({ 
       success: true, 
@@ -190,7 +153,11 @@ Format your response as:
   } catch (error) {
     console.error('Text Translator Background: Error during translation:', error);
     const latency = Date.now() - startTime;
-    trackUsage('translate', latency, false);
+    const result = await chrome.storage.local.get(['extensionUserId']);
+    const userId = result.extensionUserId || 'anonymous';
+    
+    // Log error metric to dashboard
+    logMetricToDashboard({ type: 'error', userId, latency });
     
     let errorMessage = error.message || 'Unknown error occurred';
     
@@ -199,6 +166,26 @@ Format your response as:
     }
     
     sendResponse({ error: errorMessage });
+  }
+}
+
+// Log metrics to dashboard
+async function logMetricToDashboard(data) {
+  try {
+    const DASHBOARD_URL = 'https://translator-dashboard-lilac.vercel.app';
+    
+    await fetch(`${DASHBOARD_URL}/api/metrics`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...data,
+        timestamp: Date.now()
+      })
+    });
+  } catch (error) {
+    console.error('Failed to log metric:', error);
   }
 }
 
@@ -229,10 +216,11 @@ async function incrementDailyUsage() {
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Text Translator: Extension installed/updated', details.reason);
   if (details.reason === 'install') {
+    const userId = 'ext_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     chrome.storage.local.set({
       targetLanguage: 'English',
       subscriptionTier: 'free',
-      analytics: analytics
+      extensionUserId: userId
     });
   }
 });

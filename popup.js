@@ -1,25 +1,20 @@
 // Load saved settings on popup open
 document.addEventListener('DOMContentLoaded', async () => {
   loadSettings();
-  loadAnalytics();
   setupEventListeners();
   checkPremiumStatus();
 });
 
 // Periodically check for premium status updates
 function checkPremiumStatus() {
-  // Check immediately
   syncPremiumStatus();
-  
-  // Check every 30 seconds while popup is open
   setInterval(syncPremiumStatus, 30000);
 }
 
 // Sync premium status from server/storage
 async function syncPremiumStatus() {
-  const result = await chrome.storage.local.get(['subscriptionTier', 'premiumCheckTimestamp']);
+  const result = await chrome.storage.local.get(['subscriptionTier']);
   
-  // If premium, verify it's still active (you can add server verification here)
   if (result.subscriptionTier === 'premium') {
     updateSubscriptionDisplay('premium');
   }
@@ -49,9 +44,19 @@ function setupEventListeners() {
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
   document.getElementById('toggleApiKey').addEventListener('click', toggleApiKeyVisibility);
   document.getElementById('upgradeToPremium').addEventListener('click', handleUpgrade);
+  document.getElementById('openDashboard').addEventListener('click', openDashboard);
   document.getElementById('apiKey').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') saveSettings();
   });
+}
+
+// Open dashboard
+async function openDashboard() {
+  const result = await chrome.storage.local.get(['extensionUserId']);
+  const userId = result.extensionUserId || 'anonymous';
+  
+  const DASHBOARD_URL = 'https://translator-dashboard-lilac.vercel.app'; 
+  chrome.tabs.create({ url: `${DASHBOARD_URL}?userId=${userId}` });
 }
 
 // Save settings
@@ -122,9 +127,6 @@ function showStatus(message, type) {
 
 // Handle upgrade to premium with Stripe
 async function handleUpgrade() {
-  const btn = document.getElementById('upgradeToPremium');
-  
-  // Generate unique user ID for this extension installation
   const result = await chrome.storage.local.get(['extensionUserId']);
   let userId = result.extensionUserId;
   
@@ -133,7 +135,6 @@ async function handleUpgrade() {
     await chrome.storage.local.set({ extensionUserId: userId });
   }
   
-  // Show modal with payment options
   const modal = document.createElement('div');
   modal.style.cssText = `
     position: fixed;
@@ -189,44 +190,31 @@ async function handleUpgrade() {
   
   document.body.appendChild(modal);
   
-  // Handle proceed to Stripe
   document.getElementById('proceedToPayment').onclick = () => {
-    
     const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_14A6oH0F328l2FG4kj4sE00';
-    
-    // Add user ID to the payment link for tracking
     const paymentUrl = `${STRIPE_PAYMENT_LINK}?client_reference_id=${userId}`;
     
-    // Store that we're expecting a payment
     chrome.storage.local.set({ 
       pendingPayment: true,
       paymentInitiatedAt: Date.now()
     });
     
-    // Open payment in new tab
     chrome.tabs.create({ url: paymentUrl });
-    
     modal.remove();
     
-    // Show waiting message
     showStatus('Opening secure checkout... Check your new tab!', 'success');
-    
-    // Start polling for payment confirmation
     startPaymentPolling();
   };
   
-  // Handle demo mode
   document.getElementById('useDemoMode').onclick = () => {
     modal.remove();
-    activateDemoMode(btn);
+    activateDemoMode();
   };
   
-  // Handle cancel
   document.getElementById('cancelPayment').onclick = () => {
     modal.remove();
   };
   
-  // Close on background click
   modal.onclick = (e) => {
     if (e.target === modal) {
       modal.remove();
@@ -237,14 +225,13 @@ async function handleUpgrade() {
 // Poll for payment confirmation
 function startPaymentPolling() {
   let pollCount = 0;
-  const maxPolls = 60; // Poll for 5 minutes max
+  const maxPolls = 60;
   
   const pollInterval = setInterval(async () => {
     pollCount++;
     
     const result = await chrome.storage.local.get(['subscriptionTier', 'pendingPayment']);
     
-    // Check if premium was activated
     if (result.subscriptionTier === 'premium') {
       clearInterval(pollInterval);
       await chrome.storage.local.set({ pendingPayment: false });
@@ -253,40 +240,30 @@ function startPaymentPolling() {
       return;
     }
     
-    // Stop polling after max attempts
     if (pollCount >= maxPolls) {
       clearInterval(pollInterval);
       await chrome.storage.local.set({ pendingPayment: false });
     }
-  }, 5000); // Poll every 5 seconds
+  }, 5000);
 }
 
-// Activate demo mode (for testing/demonstration)
-async function activateDemoMode(btn) {
-  const originalText = btn.textContent;
-  btn.textContent = 'Processing...';
-  btn.disabled = true;
+// Activate demo mode
+async function activateDemoMode() {
+  await chrome.storage.local.set({ 
+    subscriptionTier: 'premium',
+    paymentMethod: 'demo',
+    premiumActivatedAt: Date.now()
+  });
+  updateSubscriptionDisplay('premium');
   
-  // Simulate payment processing
-  setTimeout(async () => {
-    await chrome.storage.local.set({ 
-      subscriptionTier: 'premium',
-      paymentMethod: 'demo',
-      premiumActivatedAt: Date.now()
-    });
-    updateSubscriptionDisplay('premium');
-    btn.textContent = 'Current Plan';
-    
-    showStatus('✅ Demo Mode: Premium Activated!', 'success');
-    
-    alert(
-      '🎉 Welcome to Premium!\n\n' +
-      '✓ Unlimited translations activated\n' +
-      '✓ All features unlocked\n\n' +
-      'Note: This is demo mode for testing.\n' +
-      'To use real payments, set up your Stripe Payment Link.'
-    );
-  }, 1500);
+  showStatus('✅ Demo Mode: Premium Activated!', 'success');
+  
+  alert(
+    '🎉 Welcome to Premium!\n\n' +
+    '✓ Unlimited translations activated\n' +
+    '✓ All features unlocked\n\n' +
+    'Note: This is demo mode for testing.'
+  );
 }
 
 // Update subscription display
@@ -343,58 +320,4 @@ async function handleDowngrade() {
     updateSubscriptionDisplay('free');
     showStatus('Downgraded to Free plan', 'success');
   }
-}
-
-// Load analytics
-async function loadAnalytics() {
-  chrome.runtime.sendMessage({ action: 'getAnalytics' }, (response) => {
-    if (response && response.analytics) {
-      const analytics = response.analytics;
-      
-      document.getElementById('totalUsage').textContent = analytics.usageCount;
-      
-      const avgLatency = analytics.requestCount > 0 
-        ? Math.round(analytics.totalLatency / analytics.requestCount)
-        : 0;
-      document.getElementById('avgLatency').textContent = avgLatency + 'ms';
-      
-      const successRate = analytics.requestCount > 0
-        ? Math.round((analytics.successes / analytics.requestCount) * 100)
-        : 100;
-      document.getElementById('successRate').textContent = successRate + '%';
-      
-      document.getElementById('errorCount').textContent = analytics.errors;
-      
-      renderChart(analytics);
-    }
-  });
-}
-
-// Render analytics chart
-function renderChart(analytics) {
-  const chartContainer = document.querySelector('.chart-container');
-  
-  const chartHTML = `
-    <div style="margin-bottom: 12px; font-weight: 600; font-size: 14px; color: #333;">
-      Usage Overview
-    </div>
-    <div style="display: flex; align-items: flex-end; gap: 8px; height: 120px;">
-      <div style="flex: 1; background: linear-gradient(to top, #667eea, #764ba2); 
-        height: ${Math.min((analytics.successes / Math.max(analytics.requestCount, 1)) * 100, 100)}%; 
-        border-radius: 8px 8px 0 0; position: relative;">
-        <div style="position: absolute; bottom: -20px; width: 100%; text-align: center; font-size: 11px; color: #666;">
-          Success<br>${analytics.successes}
-        </div>
-      </div>
-      <div style="flex: 1; background: linear-gradient(to top, #e74c3c, #c0392b); 
-        height: ${Math.min((analytics.errors / Math.max(analytics.requestCount, 1)) * 100, 100)}%; 
-        border-radius: 8px 8px 0 0; position: relative;">
-        <div style="position: absolute; bottom: -20px; width: 100%; text-align: center; font-size: 11px; color: #666;">
-          Errors<br>${analytics.errors}
-        </div>
-      </div>
-    </div>
-  `;
-  
-  chartContainer.innerHTML = chartHTML;
 }
