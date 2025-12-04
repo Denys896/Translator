@@ -3,7 +3,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadSettings();
   loadAnalytics();
   setupEventListeners();
+  checkUrlForPaymentSuccess();
 });
+
+// Check if user returned from successful payment
+function checkUrlForPaymentSuccess() {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('payment') === 'success') {
+    // User returned from successful Stripe payment
+    chrome.storage.local.set({ subscriptionTier: 'premium' });
+    updateSubscriptionDisplay('premium');
+    showStatus('Payment successful! Welcome to Premium! 🎉', 'success');
+  }
+}
 
 // Load settings from storage
 async function loadSettings() {
@@ -26,16 +38,9 @@ async function loadSettings() {
 
 // Setup event listeners
 function setupEventListeners() {
-  // Save settings button
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
-  
-  // Toggle API key visibility
   document.getElementById('toggleApiKey').addEventListener('click', toggleApiKeyVisibility);
-  
-  // Upgrade to premium button
   document.getElementById('upgradeToPremium').addEventListener('click', handleUpgrade);
-  
-  // Enter key to save
   document.getElementById('apiKey').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') saveSettings();
   });
@@ -46,7 +51,6 @@ async function saveSettings() {
   const saveBtn = document.getElementById('saveSettings');
   const btnText = saveBtn.querySelector('.btn-text');
   const btnLoading = saveBtn.querySelector('.btn-loading');
-  const statusMsg = document.getElementById('saveStatus');
   
   const apiKey = document.getElementById('apiKey').value.trim();
   const targetLanguage = document.getElementById('targetLanguage').value;
@@ -61,7 +65,6 @@ async function saveSettings() {
     return;
   }
   
-  // Show loading state
   btnText.style.display = 'none';
   btnLoading.style.display = 'flex';
   saveBtn.disabled = true;
@@ -109,34 +112,139 @@ function showStatus(message, type) {
   }
 }
 
-// Handle upgrade to premium
+// Handle upgrade to premium with Stripe Payment Link
 async function handleUpgrade() {
-  // In a real implementation, this would integrate with Stripe
-  // For this demo, we'll simulate a payment flow
+  const btn = document.getElementById('upgradeToPremium');
+  const originalText = btn.textContent;
   
-  const confirmUpgrade = confirm(
-    'Upgrade to Premium for $4.99/month?\n\n' +
-    '✓ Unlimited translations\n' +
-    '✓ Detailed explanations\n' +
-    '✓ Priority support\n\n' +
-    'Click OK to proceed to payment (Demo mode - will not charge)'
-  );
+  // Show modal with payment options
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  `;
   
-  if (confirmUpgrade) {
-    // Simulate payment processing
-    const btn = document.getElementById('upgradeToPremium');
-    const originalText = btn.textContent;
-    btn.textContent = 'Processing...';
-    btn.disabled = true;
-    
-    setTimeout(async () => {
-      await chrome.storage.local.set({ subscriptionTier: 'premium' });
-      updateSubscriptionDisplay('premium');
-      btn.textContent = 'Current Plan';
+  modal.innerHTML = `
+    <div style="background: white; padding: 30px; border-radius: 12px; max-width: 400px; text-align: center;">
+      <h2 style="margin: 0 0 16px 0; color: #333;">Upgrade to Premium</h2>
+      <div style="margin-bottom: 20px;">
+        <div style="font-size: 36px; font-weight: bold; color: #667eea; margin-bottom: 8px;">$4.99<span style="font-size: 16px; color: #999;">/month</span></div>
+        <p style="color: #666; margin: 0 0 16px 0;">Unlimited translations & advanced features</p>
+      </div>
       
-      alert('Welcome to Premium! 🎉\n\nYou now have unlimited translations.');
-    }, 1500);
-  }
+      <div style="text-align: left; margin-bottom: 20px; padding: 16px; background: #f5f7fa; border-radius: 8px;">
+        <div style="margin-bottom: 8px; color: #333; font-weight: 600;">✓ Unlimited translations</div>
+        <div style="margin-bottom: 8px; color: #333; font-weight: 600;">✓ Up to 1000 words per translation</div>
+        <div style="margin-bottom: 8px; color: #333; font-weight: 600;">✓ Detailed explanations</div>
+        <div style="margin-bottom: 8px; color: #333; font-weight: 600;">✓ Priority support</div>
+        <div style="color: #333; font-weight: 600;">✓ Cancel anytime</div>
+      </div>
+      
+      <button id="proceedToPayment" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 12px;">
+        Continue to Stripe Checkout
+      </button>
+      
+      <button id="useDemoMode" style="width: 100%; padding: 12px; background: white; color: #666; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 12px;">
+        Use Demo Mode (For Testing)
+      </button>
+      
+      <button id="cancelPayment" style="width: 100%; padding: 12px; background: transparent; color: #999; border: none; font-size: 14px; cursor: pointer;">
+        Cancel
+      </button>
+      
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
+        <img src="https://stripe.com/img/v3/home/twitter.png" alt="Stripe" style="height: 20px; opacity: 0.5;">
+        <p style="font-size: 11px; color: #999; margin: 8px 0 0 0;">Secure payment by Stripe</p>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Handle proceed to Stripe
+  document.getElementById('proceedToPayment').onclick = () => {
+    // Replace with your actual Stripe Payment Link
+    // You'll create this in the Stripe Dashboard (see instructions below)
+    const stripePaymentLink = 'https://buy.stripe.com/test_XXXXXXXXXXXXXX';
+    
+    // For demo purposes, show instructions
+    const useRealStripe = confirm(
+      '🔗 Stripe Payment Link Setup\n\n' +
+      'To use real Stripe payments:\n\n' +
+      '1. Go to stripe.com and create a free account\n' +
+      '2. Stay in TEST MODE\n' +
+      '3. Create a Product ($4.99/month)\n' +
+      '4. Create a Payment Link\n' +
+      '5. Replace the URL in popup.js\n\n' +
+      'Click OK to see setup instructions\n' +
+      'Click Cancel to use demo mode'
+    );
+    
+    if (useRealStripe) {
+      // Open setup instructions
+      chrome.tabs.create({ 
+        url: 'https://stripe.com/docs/payment-links' 
+      });
+      modal.remove();
+    } else {
+      // Use demo mode
+      modal.remove();
+      activateDemoMode(btn);
+    }
+  };
+  
+  // Handle demo mode
+  document.getElementById('useDemoMode').onclick = () => {
+    modal.remove();
+    activateDemoMode(btn);
+  };
+  
+  // Handle cancel
+  document.getElementById('cancelPayment').onclick = () => {
+    modal.remove();
+  };
+  
+  // Close on background click
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      modal.remove();
+    }
+  };
+}
+
+// Activate demo mode (for testing/demonstration)
+async function activateDemoMode(btn) {
+  const originalText = btn.textContent;
+  btn.textContent = 'Processing...';
+  btn.disabled = true;
+  
+  // Simulate payment processing
+  setTimeout(async () => {
+    await chrome.storage.local.set({ 
+      subscriptionTier: 'premium',
+      paymentMethod: 'demo'
+    });
+    updateSubscriptionDisplay('premium');
+    btn.textContent = 'Current Plan';
+    
+    showStatus('✅ Demo Mode: Premium Activated!', 'success');
+    
+    alert(
+      '🎉 Welcome to Premium!\n\n' +
+      '✓ Unlimited translations activated\n' +
+      '✓ All features unlocked\n\n' +
+      'Note: This is demo mode for testing.\n' +
+      'In production, you would integrate real Stripe payments.'
+    );
+  }, 1500);
 }
 
 // Update subscription display
@@ -150,21 +258,48 @@ function updateSubscriptionDisplay(tier) {
     badge.classList.add('premium');
     limit.textContent = 'Unlimited translations';
     
-    // Update buttons
     const freeBtn = document.querySelector('[data-tier="free"] .btn');
     const premiumBtn = document.querySelector('[data-tier="premium"] .btn');
     
-    freeBtn.textContent = 'Downgrade';
-    freeBtn.disabled = false;
-    freeBtn.classList.remove('btn-outline');
-    freeBtn.classList.add('btn-outline');
-    
-    premiumBtn.textContent = 'Current Plan';
-    premiumBtn.disabled = true;
+    if (freeBtn && premiumBtn) {
+      freeBtn.textContent = 'Downgrade';
+      freeBtn.disabled = false;
+      freeBtn.onclick = handleDowngrade;
+      
+      premiumBtn.textContent = 'Current Plan';
+      premiumBtn.disabled = true;
+    }
   } else {
     badge.textContent = 'FREE';
     badge.classList.remove('premium');
     limit.textContent = '5 translations/day';
+    
+    const freeBtn = document.querySelector('[data-tier="free"] .btn');
+    const premiumBtn = document.querySelector('[data-tier="premium"] .btn');
+    
+    if (freeBtn && premiumBtn) {
+      freeBtn.textContent = 'Current Plan';
+      freeBtn.disabled = true;
+      
+      premiumBtn.textContent = 'Upgrade Now';
+      premiumBtn.disabled = false;
+    }
+  }
+}
+
+// Handle downgrade
+async function handleDowngrade() {
+  const confirm = window.confirm(
+    'Downgrade to Free Plan?\n\n' +
+    '• Limited to 5 translations per day\n' +
+    '• Basic explanations only\n\n' +
+    'You can upgrade again anytime.'
+  );
+  
+  if (confirm) {
+    await chrome.storage.local.set({ subscriptionTier: 'free' });
+    updateSubscriptionDisplay('free');
+    showStatus('Downgraded to Free plan', 'success');
   }
 }
 
@@ -193,7 +328,7 @@ async function loadAnalytics() {
   });
 }
 
-// Render analytics chart (simple bar representation)
+// Render analytics chart
 function renderChart(analytics) {
   const chartContainer = document.querySelector('.chart-container');
   
