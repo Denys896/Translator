@@ -1,357 +1,303 @@
-// Wait for DOM and Chrome API to be fully ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initExtension);
-} else {
-  initExtension();
-}
-
-function initExtension() {
-  // Strict Chrome API validation with multiple checks
-  const validateChromeAPI = () => {
-    try {
-      if (typeof chrome === 'undefined') {
-        console.error('Text Translator: chrome object is undefined');
-        return false;
-      }
-      
-      if (!chrome.runtime) {
-        console.error('Text Translator: chrome.runtime is undefined');
-        return false;
-      }
-      
-      if (!chrome.runtime.id) {
-        console.error('Text Translator: chrome.runtime.id is undefined (context invalidated)');
-        return false;
-      }
-      
-      if (typeof chrome.runtime.sendMessage !== 'function') {
-        console.error('Text Translator: chrome.runtime.sendMessage is not a function');
-        return false;
-      }
-      
-      return true;
-    } catch (e) {
-      console.error('Text Translator: Chrome API validation error:', e);
-      return false;
-    }
-  };
+// Content script - maximum compatibility and error handling
+(function() {
+  'use strict';
   
-  // Initial validation
-  if (!validateChromeAPI()) {
-    console.error('Text Translator: Extension cannot run on this page - Chrome API not available');
+  // CRITICAL: Check if we're in a valid context
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
     return;
   }
   
-  console.log('Text Translator: Content script initialized successfully');
+  // Store chrome reference
+  var chromeAPI = typeof chrome !== 'undefined' ? chrome : null;
   
-  // Global state
-  let popup = null;
-  let isLoading = false;
-  let quickActionTimeout = null;
-  let isExtensionValid = true;
-  
-  // Monitor extension validity
-  const checkExtensionValidity = () => {
-    if (!validateChromeAPI()) {
-      isExtensionValid = false;
-      console.error('Text Translator: Extension context has been invalidated');
-      cleanupExtension();
+  // Validate extension is available
+  function isExtensionValid() {
+    try {
+      return !!(chromeAPI && 
+                chromeAPI.runtime && 
+                chromeAPI.runtime.id && 
+                typeof chromeAPI.runtime.sendMessage === 'function');
+    } catch (e) {
       return false;
     }
-    return true;
-  };
+  }
   
-  // Listen for text selection
-  document.addEventListener('mouseup', handleTextSelection);
+  // Exit early if not valid
+  if (!isExtensionValid()) {
+    console.error('Text Translator: Extension API not available');
+    return;
+  }
   
-  // Listen for clicks outside popup
-  document.addEventListener('mousedown', handleOutsideClick);
+  console.log('Text Translator: Starting...');
   
-  function handleTextSelection(e) {
-    if (!isExtensionValid || !checkExtensionValidity()) return;
+  // State
+  var popup = null;
+  var isLoading = false;
+  var quickTimeout = null;
+  var isDisabled = false;
+  
+  // Selection handler
+  function handleSelection(e) {
+    if (isDisabled) return;
     
     try {
-      const selectedText = window.getSelection().toString().trim();
+      var sel = window.getSelection();
+      if (!sel) return;
       
-      if (selectedText.length > 0 && selectedText.length < 500) {
-        showQuickAction(e.pageX, e.pageY, selectedText);
+      var text = sel.toString().trim();
+      
+      if (text.length > 0 && text.length < 500) {
+        showButton(e.pageX, e.pageY, text);
       } else if (popup && !popup.contains(e.target)) {
-        hidePopup();
+        hideAll();
       }
-    } catch (error) {
-      console.error('Text Translator: Error in handleTextSelection:', error);
+    } catch (err) {
+      console.error('Text Translator: Selection error:', err);
     }
   }
   
-  function handleOutsideClick(e) {
-    if (!isExtensionValid) return;
+  // Click outside handler
+  function handleClick(e) {
+    if (isDisabled || !popup) return;
     
     try {
-      if (popup && !popup.contains(e.target) && !isLoading) {
-        hidePopup();
+      if (!popup.contains(e.target) && !isLoading) {
+        hideAll();
       }
-    } catch (error) {
-      console.error('Text Translator: Error in handleOutsideClick:', error);
+    } catch (err) {
+      console.error('Text Translator: Click error:', err);
     }
   }
   
-  function showQuickAction(x, y, text) {
-    if (!isExtensionValid) return;
-    
+  // Show quick button
+  function showButton(x, y, text) {
     try {
-      hidePopup();
+      hideAll();
       
-      const quickAction = document.createElement('div');
-      quickAction.className = 'translate-explain-quick-action';
-      quickAction.innerHTML = `
-        <button class="translate-explain-btn" title="Translate & Explain">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
-          </svg>
-        </button>
-      `;
+      var btn = document.createElement('div');
+      btn.className = 'translate-explain-quick-action';
+      btn.innerHTML = '<button class="translate-explain-btn">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+        '<path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>' +
+        '</button>';
       
-      quickAction.style.left = `${x}px`;
-      quickAction.style.top = `${y - 40}px`;
+      btn.style.left = x + 'px';
+      btn.style.top = (y - 40) + 'px';
       
-      document.body.appendChild(quickAction);
+      document.body.appendChild(btn);
       
-      const btn = quickAction.querySelector('.translate-explain-btn');
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        quickAction.remove();
+      btn.querySelector('.translate-explain-btn').onclick = function(evt) {
+        evt.stopPropagation();
+        btn.remove();
         showPopup(x, y, text);
-      });
+      };
       
-      if (quickActionTimeout) {
-        clearTimeout(quickActionTimeout);
-      }
-      
-      quickActionTimeout = setTimeout(() => {
-        if (quickAction && quickAction.parentNode) {
-          quickAction.remove();
-        }
+      if (quickTimeout) clearTimeout(quickTimeout);
+      quickTimeout = setTimeout(function() {
+        if (btn.parentNode) btn.remove();
       }, 3000);
-    } catch (error) {
-      console.error('Text Translator: Error in showQuickAction:', error);
+    } catch (err) {
+      console.error('Text Translator: Button error:', err);
     }
   }
   
+  // Show popup
   function showPopup(x, y, text) {
-    if (!isExtensionValid || !checkExtensionValidity()) {
-      alert('Text Translator: Extension needs to be reloaded. Please refresh this page.');
+    // Check extension is still valid
+    if (!isExtensionValid()) {
+      alert('Extension was reloaded. Please refresh this page.');
+      isDisabled = true;
       return;
     }
     
     try {
-      hidePopup();
+      hideAll();
       
       popup = document.createElement('div');
       popup.className = 'translate-explain-popup';
-      popup.innerHTML = `
-        <div class="translate-explain-header">
-          <h3>Translate & Explain</h3>
-          <button class="translate-explain-close">×</button>
-        </div>
-        <div class="translate-explain-content">
-          <div class="translate-explain-loading">
-            <div class="spinner"></div>
-            <p>Analyzing text...</p>
-          </div>
-        </div>
-      `;
+      popup.innerHTML = 
+        '<div class="translate-explain-header">' +
+        '<h3>Translate & Explain</h3>' +
+        '<button class="translate-explain-close">×</button>' +
+        '</div>' +
+        '<div class="translate-explain-content">' +
+        '<div class="translate-explain-loading">' +
+        '<div class="spinner"></div>' +
+        '<p>Analyzing text...</p>' +
+        '</div></div>';
       
-      const popupWidth = 400;
-      const popupHeight = 300;
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      
-      const left = Math.min(Math.max(10, x), viewportWidth - popupWidth - 10);
-      const top = Math.min(Math.max(10, y + 10), viewportHeight - popupHeight - 10);
-      
-      popup.style.left = `${left}px`;
-      popup.style.top = `${top}px`;
+      var w = window.innerWidth;
+      var h = window.innerHeight;
+      popup.style.left = Math.min(Math.max(10, x), w - 410) + 'px';
+      popup.style.top = Math.min(Math.max(10, y + 10), h - 310) + 'px';
       
       document.body.appendChild(popup);
+      popup.querySelector('.translate-explain-close').onclick = hideAll;
       
-      popup.querySelector('.translate-explain-close').addEventListener('click', hidePopup);
-      
-      sendTranslationRequest(text);
-    } catch (error) {
-      console.error('Text Translator: Error in showPopup:', error);
-      showError('Failed to create popup: ' + error.message);
+      sendRequest(text);
+    } catch (err) {
+      console.error('Text Translator: Popup error:', err);
     }
   }
   
-  function sendTranslationRequest(text) {
-    if (!checkExtensionValidity()) {
-      showError('Extension context invalidated. Please refresh the page.');
+  // Send request to background
+  function sendRequest(text) {
+    // Final validation
+    if (!isExtensionValid()) {
+      showError('Extension connection lost. Refresh the page.');
+      isDisabled = true;
       return;
     }
     
     isLoading = true;
-    console.log('Text Translator: Sending translation request');
     
-    // Wrap in try-catch and use async approach
+    var timeout = setTimeout(function() {
+      isLoading = false;
+      showError('Request timed out');
+    }, 30000);
+    
     try {
-      const messagePromise = new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('Request timed out after 30 seconds'));
-        }, 30000);
-        
-        try {
-          chrome.runtime.sendMessage(
-            { action: 'translateAndExplain', data: { text: text } },
-            (response) => {
-              clearTimeout(timeoutId);
-              
-              // Check for errors
-              const lastError = chrome.runtime.lastError;
-              if (lastError) {
-                reject(new Error(lastError.message || 'Unknown runtime error'));
-                return;
-              }
-              
-              if (!response) {
-                reject(new Error('No response received'));
-                return;
-              }
-              
-              resolve(response);
+      chromeAPI.runtime.sendMessage(
+        { action: 'translateAndExplain', data: { text: text } },
+        function(resp) {
+          clearTimeout(timeout);
+          isLoading = false;
+          
+          // Check for context invalidation error
+          var lastErr = chromeAPI.runtime.lastError;
+          if (lastErr) {
+            var msg = lastErr.message || '';
+            if (msg.indexOf('context invalidated') !== -1 || 
+                msg.indexOf('Extension context') !== -1) {
+              showError('Extension was reloaded. Please refresh this page.');
+              isDisabled = true;
+            } else {
+              showError('Error: ' + msg);
             }
-          );
-        } catch (err) {
-          clearTimeout(timeoutId);
-          reject(err);
-        }
-      });
-      
-      messagePromise
-        .then(handleResponse)
-        .catch((error) => {
-          console.error('Text Translator: Request failed:', error);
-          
-          let errorMessage = error.message || 'Unknown error occurred';
-          
-          if (errorMessage.includes('Extension context invalidated')) {
-            errorMessage = 'Extension was updated. Please refresh this page.';
-            isExtensionValid = false;
-          } else if (errorMessage.includes('Could not establish connection')) {
-            errorMessage = 'Cannot connect to extension. Please check if it\'s enabled.';
-          } else if (errorMessage.includes('Receiving end does not exist')) {
-            errorMessage = 'Extension background script not responding. Try reloading the extension.';
+            return;
           }
           
-          showError(errorMessage);
-        });
-    } catch (error) {
-      console.error('Text Translator: Critical error:', error);
-      showError('Critical error: ' + error.message);
+          if (!resp) {
+            showError('No response received');
+            return;
+          }
+          
+          if (resp.error) {
+            showError(resp.error);
+          } else if (resp.result) {
+            showResult(resp);
+          } else {
+            showError('Invalid response');
+          }
+        }
+      );
+    } catch (err) {
+      clearTimeout(timeout);
+      isLoading = false;
+      console.error('Text Translator: Send error:', err);
+      showError('Failed to send request');
     }
   }
   
-  function handleResponse(response) {
+  // Show result
+  function showResult(resp) {
+    if (!popup) return;
+    
+    var content = popup.querySelector('.translate-explain-content');
+    if (!content) return;
+    
+    try {
+      var html = formatText(resp.result);
+      content.innerHTML = 
+        '<div class="translate-explain-result">' + html +
+        '<div class="translate-explain-meta">' +
+        '<span>Response time: ' + resp.latency + 'ms</span>' +
+        '<span>Daily usage: ' + resp.dailyUsage + '/' + resp.limit + '</span>' +
+        '</div></div>';
+    } catch (err) {
+      console.error('Text Translator: Result error:', err);
+    }
+  }
+  
+  // Show error
+  function showError(msg) {
     isLoading = false;
+    if (!popup) return;
     
-    if (!popup) {
-      console.error('Text Translator: Popup was closed before response');
-      return;
-    }
+    var content = popup.querySelector('.translate-explain-content');
+    if (!content) return;
     
-    const content = popup.querySelector('.translate-explain-content');
-    if (!content) {
-      console.error('Text Translator: Content element not found');
-      return;
-    }
-    
-    if (response.error) {
-      console.error('Text Translator: API Error:', response.error);
-      content.innerHTML = `
-        <div class="translate-explain-error">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <p>${escapeHtml(response.error)}</p>
-        </div>
-      `;
-    } else if (response.result) {
-      console.log('Text Translator: Success');
-      content.innerHTML = `
-        <div class="translate-explain-result">
-          ${formatResult(response.result)}
-          <div class="translate-explain-meta">
-            <span>Response time: ${response.latency}ms</span>
-            <span>Daily usage: ${response.dailyUsage}/${response.limit}</span>
-          </div>
-        </div>
-      `;
-    } else {
-      showError('Invalid response format');
+    try {
+      var safe = escapeHTML(msg);
+      content.innerHTML = 
+        '<div class="translate-explain-error">' +
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+        '<circle cx="12" cy="12" r="10"/>' +
+        '<line x1="12" y1="8" x2="12" y2="12"/>' +
+        '<line x1="12" y1="16" x2="12.01" y2="16"/>' +
+        '</svg><p>' + safe + '</p></div>';
+    } catch (err) {
+      console.error('Text Translator: Error display error:', err);
     }
   }
   
-  function showError(message) {
-    isLoading = false;
-    
-    if (popup) {
-      const content = popup.querySelector('.translate-explain-content');
-      if (content) {
-        content.innerHTML = `
-          <div class="translate-explain-error">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            <p>${escapeHtml(message)}</p>
-          </div>
-        `;
-      }
-    }
-  }
-  
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
+  // Escape HTML
+  function escapeHTML(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
     return div.innerHTML;
   }
   
-  function formatResult(text) {
-    const escaped = escapeHtml(text);
-    return escaped
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/\n/g, '<br>');
+  // Format text
+  function formatText(str) {
+    var safe = escapeHTML(str);
+    safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    safe = safe.replace(/\n\n/g, '</p><p>');
+    safe = safe.replace(/\n/g, '<br>');
+    return safe;
   }
   
-  function hidePopup() {
+  // Hide all UI
+  function hideAll() {
     try {
-      if (popup) {
+      if (popup && popup.parentNode) {
         popup.remove();
-        popup = null;
+      }
+      popup = null;
+      
+      var btns = document.querySelectorAll('.translate-explain-quick-action');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].parentNode) btns[i].remove();
       }
       
-      const quickActions = document.querySelectorAll('.translate-explain-quick-action');
-      quickActions.forEach(qa => qa.remove());
-      
-      if (quickActionTimeout) {
-        clearTimeout(quickActionTimeout);
-        quickActionTimeout = null;
+      if (quickTimeout) {
+        clearTimeout(quickTimeout);
+        quickTimeout = null;
       }
-    } catch (error) {
-      console.error('Text Translator: Error in hidePopup:', error);
+    } catch (err) {
+      console.error('Text Translator: Hide error:', err);
     }
   }
   
-  function cleanupExtension() {
-    console.log('Text Translator: Cleaning up extension');
-    hidePopup();
-    document.removeEventListener('mouseup', handleTextSelection);
-    document.removeEventListener('mousedown', handleOutsideClick);
+  // Initialize
+  function init() {
+    try {
+      document.addEventListener('mouseup', handleSelection);
+      document.addEventListener('mousedown', handleClick);
+      window.addEventListener('beforeunload', hideAll);
+      console.log('Text Translator: Ready');
+    } catch (err) {
+      console.error('Text Translator: Init error:', err);
+    }
   }
   
-  // Cleanup on page unload
-  window.addEventListener('beforeunload', cleanupExtension);
-}
+  // Start
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(init, 100);
+    });
+  } else {
+    setTimeout(init, 100);
+  }
+  
+})();

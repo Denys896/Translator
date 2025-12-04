@@ -109,7 +109,7 @@ async function handleTranslateAndExplain(data, sendResponse) {
     console.log('Text Translator Background: Calling OpenAI API');
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -220,7 +220,7 @@ async function incrementDailyUsage() {
   
   if (result.usageDate !== today) {
     await chrome.storage.local.set({ dailyUsage: 1, usageDate: today });
-  } else {d
+  } else {
     await chrome.storage.local.set({ dailyUsage: (result.dailyUsage || 0) + 1 });
   }
 }
@@ -229,7 +229,6 @@ async function incrementDailyUsage() {
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('Text Translator: Extension installed/updated', details.reason);
   if (details.reason === 'install') {
-    // Set default values on first install
     chrome.storage.local.set({
       targetLanguage: 'English',
       subscriptionTier: 'free',
@@ -238,7 +237,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// Keep service worker alive (ping every 20 seconds)
+// Keep service worker alive
 let keepAliveInterval;
 function startKeepAlive() {
   if (keepAliveInterval) {
