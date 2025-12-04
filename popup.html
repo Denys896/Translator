@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Text Translator & Explainer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <h1>🌐 Text Translator & Explainer</h1>
+        <p class="tagline">AI-powered translation with context</p>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- Settings Section -->
+      <section class="section">
+        <h2>⚙️ Settings</h2>
+        
+        <div class="input-group">
+          <label for="apiKey">OpenAI API Key</label>
+          <div class="input-with-button">
+            <input 
+              type="password" 
+              id="apiKey" 
+              placeholder="sk-..." 
+              autocomplete="off"
+            >
+            <button id="toggleApiKey" class="toggle-btn" title="Show/Hide">👁️</button>
+          </div>
+          <small>Your key is stored locally and never shared</small>
+        </div>
+
+        <div class="input-group">
+          <label for="targetLanguage">Target Language</label>
+          <select id="targetLanguage">
+            <option value="English">English</option>
+            <option value="Spanish">Spanish</option>
+            <option value="French">French</option>
+            <option value="German">German</option>
+            <option value="Italian">Italian</option>
+            <option value="Portuguese">Portuguese</option>
+            <option value="Russian">Russian</option>
+            <option value="Japanese">Japanese</option>
+            <option value="Korean">Korean</option>
+            <option value="Chinese">Chinese</option>
+            <option value="Arabic">Arabic</option>
+            <option value="Hindi">Hindi</option>
+          </select>
+        </div>
+
+        <button id="saveSettings" class="btn btn-primary">
+          <span class="btn-text">Save Settings</span>
+          <span class="btn-loading" style="display: none;">
+            <span class="spinner-small"></span> Saving...
+          </span>
+        </button>
+        
+        <div id="saveStatus" class="status-message"></div>
+      </section>
+
+      <!-- Subscription Section -->
+      <section class="section subscription-section">
+        <h2>💳 Subscription</h2>
+        
+        <div class="tier-info">
+          <div class="current-tier" id="currentTier">
+            <span class="tier-badge">FREE</span>
+            <span class="tier-limit">5 translations/day</span>
+          </div>
+        </div>
+
+        <div class="pricing-cards">
+          <div class="pricing-card" data-tier="free">
+            <h3>Free</h3>
+            <div class="price">$0<span>/month</span></div>
+            <ul class="features">
+              <li>✓ 5 translations per day</li>
+              <li>✓ Basic explanations</li>
+              <li>✓ All languages</li>
+            </ul>
+            <button class="btn btn-outline" disabled>Current Plan</button>
+          </div>
+
+          <div class="pricing-card premium" data-tier="premium">
+            <div class="popular-badge">POPULAR</div>
+            <h3>Premium</h3>
+            <div class="price">$4.99<span>/month</span></div>
+            <ul class="features">
+              <li>✓ Unlimited translations</li>
+              <li>✓ Detailed explanations</li>
+              <li>✓ Priority support</li>
+              <li>✓ Advanced features</li>
+            </ul>
+            <button class="btn btn-primary" id="upgradeToPremium">Upgrade Now</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Analytics Dashboard -->
+      <section class="section">
+        <h2>📊 Analytics</h2>
+        
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="totalUsage">0</div>
+            <div class="stat-label">Total Translations</div>
+          </div>
+          
+          <div class="stat-card">
+            <div class="stat-value" id="avgLatency">0ms</div>
+            <div class="stat-label">Avg Response Time</div>
+          </div>
+          
+          <div class="stat-card">
+            <div class="stat-value" id="successRate">100%</div>
+            <div class="stat-label">Success Rate</div>
+          </div>
+          
+          <div class="stat-card">
+            <div class="stat-value" id="errorCount">0</div>
+            <div class="stat-label">Errors</div>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="analyticsChart"></canvas>
+        </div>
+      </section>
+
+      <!-- Usage Instructions -->
+      <section class="section instructions">
+        <h2>📖 How to Use</h2>
+        <ol>
+          <li>Enter your OpenAI API key above</li>
+          <li>Select your preferred target language</li>
+          <li>Highlight any text on a webpage</li>
+          <li>Click the translate button that appears</li>
+          <li>View translation and explanation instantly!</li>
+        </ol>
+      </section>
+    </div>
+
+    <footer>
+      <p>Made with ❤️ for language learners</p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
