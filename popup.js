@@ -3,17 +3,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadSettings();
   loadAnalytics();
   setupEventListeners();
-  checkUrlForPaymentSuccess();
+  checkPremiumStatus();
 });
 
-// Check if user returned from successful payment
-function checkUrlForPaymentSuccess() {
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('payment') === 'success') {
-    // User returned from successful Stripe payment
-    chrome.storage.local.set({ subscriptionTier: 'premium' });
+// Periodically check for premium status updates
+function checkPremiumStatus() {
+  // Check immediately
+  syncPremiumStatus();
+  
+  // Check every 30 seconds while popup is open
+  setInterval(syncPremiumStatus, 30000);
+}
+
+// Sync premium status from server/storage
+async function syncPremiumStatus() {
+  const result = await chrome.storage.local.get(['subscriptionTier', 'premiumCheckTimestamp']);
+  
+  // If premium, verify it's still active (you can add server verification here)
+  if (result.subscriptionTier === 'premium') {
     updateSubscriptionDisplay('premium');
-    showStatus('Payment successful! Welcome to Premium! 🎉', 'success');
   }
 }
 
@@ -112,10 +120,18 @@ function showStatus(message, type) {
   }
 }
 
-// Handle upgrade to premium with Stripe Payment Link
+// Handle upgrade to premium with Stripe
 async function handleUpgrade() {
   const btn = document.getElementById('upgradeToPremium');
-  const originalText = btn.textContent;
+  
+  // Generate unique user ID for this extension installation
+  const result = await chrome.storage.local.get(['extensionUserId']);
+  let userId = result.extensionUserId;
+  
+  if (!userId) {
+    userId = 'ext_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    await chrome.storage.local.set({ extensionUserId: userId });
+  }
   
   // Show modal with payment options
   const modal = document.createElement('div');
@@ -149,7 +165,7 @@ async function handleUpgrade() {
       </div>
       
       <button id="proceedToPayment" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 12px;">
-        Continue to Stripe Checkout
+        Continue to Secure Checkout
       </button>
       
       <button id="useDemoMode" style="width: 100%; padding: 12px; background: white; color: #666; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 12px;">
@@ -164,6 +180,10 @@ async function handleUpgrade() {
         <img src="https://stripe.com/img/v3/home/twitter.png" alt="Stripe" style="height: 20px; opacity: 0.5;">
         <p style="font-size: 11px; color: #999; margin: 8px 0 0 0;">Secure payment by Stripe</p>
       </div>
+      
+      <div style="margin-top: 12px; font-size: 11px; color: #999;">
+        Your User ID: <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px;">${userId}</code>
+      </div>
     </div>
   `;
   
@@ -171,34 +191,28 @@ async function handleUpgrade() {
   
   // Handle proceed to Stripe
   document.getElementById('proceedToPayment').onclick = () => {
-    // Replace with your actual Stripe Payment Link
-    // You'll create this in the Stripe Dashboard (see instructions below)
-    const stripePaymentLink = 'https://buy.stripe.com/test_XXXXXXXXXXXXXX';
     
-    // For demo purposes, show instructions
-    const useRealStripe = confirm(
-      '🔗 Stripe Payment Link Setup\n\n' +
-      'To use real Stripe payments:\n\n' +
-      '1. Go to stripe.com and create a free account\n' +
-      '2. Stay in TEST MODE\n' +
-      '3. Create a Product ($4.99/month)\n' +
-      '4. Create a Payment Link\n' +
-      '5. Replace the URL in popup.js\n\n' +
-      'Click OK to see setup instructions\n' +
-      'Click Cancel to use demo mode'
-    );
+    const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_14A6oH0F328l2FG4kj4sE00';
     
-    if (useRealStripe) {
-      // Open setup instructions
-      chrome.tabs.create({ 
-        url: 'https://stripe.com/docs/payment-links' 
-      });
-      modal.remove();
-    } else {
-      // Use demo mode
-      modal.remove();
-      activateDemoMode(btn);
-    }
+    // Add user ID to the payment link for tracking
+    const paymentUrl = `${STRIPE_PAYMENT_LINK}?client_reference_id=${userId}`;
+    
+    // Store that we're expecting a payment
+    chrome.storage.local.set({ 
+      pendingPayment: true,
+      paymentInitiatedAt: Date.now()
+    });
+    
+    // Open payment in new tab
+    chrome.tabs.create({ url: paymentUrl });
+    
+    modal.remove();
+    
+    // Show waiting message
+    showStatus('Opening secure checkout... Check your new tab!', 'success');
+    
+    // Start polling for payment confirmation
+    startPaymentPolling();
   };
   
   // Handle demo mode
@@ -220,6 +234,33 @@ async function handleUpgrade() {
   };
 }
 
+// Poll for payment confirmation
+function startPaymentPolling() {
+  let pollCount = 0;
+  const maxPolls = 60; // Poll for 5 minutes max
+  
+  const pollInterval = setInterval(async () => {
+    pollCount++;
+    
+    const result = await chrome.storage.local.get(['subscriptionTier', 'pendingPayment']);
+    
+    // Check if premium was activated
+    if (result.subscriptionTier === 'premium') {
+      clearInterval(pollInterval);
+      await chrome.storage.local.set({ pendingPayment: false });
+      updateSubscriptionDisplay('premium');
+      showStatus('✅ Payment confirmed! Premium activated!', 'success');
+      return;
+    }
+    
+    // Stop polling after max attempts
+    if (pollCount >= maxPolls) {
+      clearInterval(pollInterval);
+      await chrome.storage.local.set({ pendingPayment: false });
+    }
+  }, 5000); // Poll every 5 seconds
+}
+
 // Activate demo mode (for testing/demonstration)
 async function activateDemoMode(btn) {
   const originalText = btn.textContent;
@@ -230,7 +271,8 @@ async function activateDemoMode(btn) {
   setTimeout(async () => {
     await chrome.storage.local.set({ 
       subscriptionTier: 'premium',
-      paymentMethod: 'demo'
+      paymentMethod: 'demo',
+      premiumActivatedAt: Date.now()
     });
     updateSubscriptionDisplay('premium');
     btn.textContent = 'Current Plan';
@@ -242,7 +284,7 @@ async function activateDemoMode(btn) {
       '✓ Unlimited translations activated\n' +
       '✓ All features unlocked\n\n' +
       'Note: This is demo mode for testing.\n' +
-      'In production, you would integrate real Stripe payments.'
+      'To use real payments, set up your Stripe Payment Link.'
     );
   }, 1500);
 }
@@ -266,7 +308,7 @@ function updateSubscriptionDisplay(tier) {
       freeBtn.disabled = false;
       freeBtn.onclick = handleDowngrade;
       
-      premiumBtn.textContent = 'Current Plan';
+      premiumBtn.textContent = '✓ Current Plan';
       premiumBtn.disabled = true;
     }
   } else {
