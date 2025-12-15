@@ -172,7 +172,7 @@ Format your response as:
 // Log metrics to dashboard
 async function logMetricToDashboard(data) {
   try {
-    const DASHBOARD_URL = 'https://translator-dashboard-lilac.vercel.app';
+    const DASHBOARD_URL = 'https://translator-dashboard-three.vercel.app';
     
     await fetch(`${DASHBOARD_URL}/api/metrics`, {
       method: 'POST',

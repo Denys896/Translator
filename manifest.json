@@ -13,6 +13,7 @@
   ],
   "externally_connectable": {
     "matches": [
+      "https://translator-dashboard-three.vercel.app/*",
       "https://*.vercel.app/*",
       "http://localhost:*/*"
     ]

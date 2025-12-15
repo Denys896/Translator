@@ -5,18 +5,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkPremiumStatus();
 });
 
+// API Configuration
+const API_URL = 'https://translator-dashboard-three.vercel.app'; // Replace with your actual Vercel URL
+
 // Periodically check for premium status updates
 function checkPremiumStatus() {
   syncPremiumStatus();
-  setInterval(syncPremiumStatus, 30000);
+  setInterval(syncPremiumStatus, 10000); // Check every 10 seconds
 }
 
-// Sync premium status from server/storage
+// Sync premium status from server
 async function syncPremiumStatus() {
-  const result = await chrome.storage.local.get(['subscriptionTier']);
-  
-  if (result.subscriptionTier === 'premium') {
-    updateSubscriptionDisplay('premium');
+  try {
+    const result = await chrome.storage.local.get(['extensionUserId', 'subscriptionTier']);
+    const userId = result.extensionUserId;
+    
+    if (!userId) return;
+
+    // Check premium status from API
+    const response = await fetch(`${API_URL}/api/premium-status?userId=${userId}`);
+    
+    if (response.ok) {
+      const data = await response.json();
+      
+      // Update local storage if status changed
+      if (data.tier !== result.subscriptionTier) {
+        await chrome.storage.local.set({ subscriptionTier: data.tier });
+        updateSubscriptionDisplay(data.tier);
+        
+        if (data.tier === 'premium') {
+          showStatus('✅ Premium activated!', 'success');
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to sync premium status:', error);
   }
 }
 
@@ -44,19 +67,9 @@ function setupEventListeners() {
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
   document.getElementById('toggleApiKey').addEventListener('click', toggleApiKeyVisibility);
   document.getElementById('upgradeToPremium').addEventListener('click', handleUpgrade);
-  document.getElementById('openDashboard').addEventListener('click', openDashboard);
   document.getElementById('apiKey').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') saveSettings();
   });
-}
-
-// Open dashboard
-async function openDashboard() {
-  const result = await chrome.storage.local.get(['extensionUserId']);
-  const userId = result.extensionUserId || 'anonymous';
-  
-  const DASHBOARD_URL = 'https://translator-dashboard-lilac.vercel.app'; 
-  chrome.tabs.create({ url: `${DASHBOARD_URL}?userId=${userId}` });
 }
 
 // Save settings
@@ -190,15 +203,17 @@ async function handleUpgrade() {
   
   document.body.appendChild(modal);
   
-  document.getElementById('proceedToPayment').onclick = () => {
-    const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_14A6oH0F328l2FG4kj4sE00';
+  document.getElementById('proceedToPayment').onclick = async () => {
+    const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_3cI28k6kV6sbbXw4SL1B600';
     const paymentUrl = `${STRIPE_PAYMENT_LINK}?client_reference_id=${userId}`;
     
-    chrome.storage.local.set({ 
+    // Mark that payment was initiated
+    await chrome.storage.local.set({ 
       pendingPayment: true,
       paymentInitiatedAt: Date.now()
     });
     
+    // Open Stripe checkout
     chrome.tabs.create({ url: paymentUrl });
     modal.remove();
     
@@ -225,45 +240,91 @@ async function handleUpgrade() {
 // Poll for payment confirmation
 function startPaymentPolling() {
   let pollCount = 0;
-  const maxPolls = 60;
+  const maxPolls = 120; // Poll for 10 minutes (120 * 5 seconds)
   
   const pollInterval = setInterval(async () => {
     pollCount++;
     
-    const result = await chrome.storage.local.get(['subscriptionTier', 'pendingPayment']);
-    
-    if (result.subscriptionTier === 'premium') {
-      clearInterval(pollInterval);
-      await chrome.storage.local.set({ pendingPayment: false });
-      updateSubscriptionDisplay('premium');
-      showStatus('✅ Payment confirmed! Premium activated!', 'success');
-      return;
+    try {
+      const result = await chrome.storage.local.get(['extensionUserId']);
+      const userId = result.extensionUserId;
+      
+      if (!userId) {
+        clearInterval(pollInterval);
+        return;
+      }
+      
+      // Check premium status from API
+      const response = await fetch(`${API_URL}/api/premium-status?userId=${userId}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.isPremium) {
+          clearInterval(pollInterval);
+          await chrome.storage.local.set({ 
+            subscriptionTier: 'premium',
+            pendingPayment: false
+          });
+          updateSubscriptionDisplay('premium');
+          showStatus('✅ Payment confirmed! Premium activated!', 'success');
+          
+          // Show success notification
+          alert('🎉 Welcome to Premium!\n\nYour payment was successful and premium features are now active!');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Poll error:', error);
     }
     
     if (pollCount >= maxPolls) {
       clearInterval(pollInterval);
       await chrome.storage.local.set({ pendingPayment: false });
+      showStatus('Payment check timed out. Please refresh if you completed payment.', 'error');
     }
-  }, 5000);
+  }, 5000); // Check every 5 seconds
 }
 
 // Activate demo mode
 async function activateDemoMode() {
-  await chrome.storage.local.set({ 
-    subscriptionTier: 'premium',
-    paymentMethod: 'demo',
-    premiumActivatedAt: Date.now()
-  });
-  updateSubscriptionDisplay('premium');
-  
-  showStatus('✅ Demo Mode: Premium Activated!', 'success');
-  
-  alert(
-    '🎉 Welcome to Premium!\n\n' +
-    '✓ Unlimited translations activated\n' +
-    '✓ All features unlocked\n\n' +
-    'Note: This is demo mode for testing.'
-  );
+  try {
+    const result = await chrome.storage.local.get(['extensionUserId']);
+    const userId = result.extensionUserId;
+    
+    // Activate premium on server
+    await fetch(`${API_URL}/api/premium-status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId: userId,
+        tier: 'premium',
+        demo: true
+      })
+    });
+    
+    // Update local storage
+    await chrome.storage.local.set({ 
+      subscriptionTier: 'premium',
+      paymentMethod: 'demo',
+      premiumActivatedAt: Date.now()
+    });
+    
+    updateSubscriptionDisplay('premium');
+    showStatus('✅ Demo Mode: Premium Activated!', 'success');
+    
+    alert(
+      '🎉 Welcome to Premium Demo!\n\n' +
+      '✓ Unlimited translations activated\n' +
+      '✓ All features unlocked\n\n' +
+      'Note: This is demo mode for testing.'
+    );
+  } catch (error) {
+    console.error('Failed to activate demo mode:', error);
+    showStatus('Failed to activate demo mode', 'error');
+  }
 }
 
 // Update subscription display
@@ -316,8 +377,29 @@ async function handleDowngrade() {
   );
   
   if (confirm) {
-    await chrome.storage.local.set({ subscriptionTier: 'free' });
-    updateSubscriptionDisplay('free');
-    showStatus('Downgraded to Free plan', 'success');
+    try {
+      const result = await chrome.storage.local.get(['extensionUserId']);
+      const userId = result.extensionUserId;
+      
+      // Update on server
+      await fetch(`${API_URL}/api/premium-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: userId,
+          tier: 'free'
+        })
+      });
+      
+      // Update local storage
+      await chrome.storage.local.set({ subscriptionTier: 'free' });
+      updateSubscriptionDisplay('free');
+      showStatus('Downgraded to Free plan', 'success');
+    } catch (error) {
+      console.error('Failed to downgrade:', error);
+      showStatus('Failed to downgrade', 'error');
+    }
   }
 }
