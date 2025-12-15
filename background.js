@@ -1,6 +1,8 @@
 // Service Worker initialization
 console.log('Text Translator: Background service worker started');
 
+const DASHBOARD_URL = 'https://translator-dashboard-three.vercel.app';
+
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Text Translator Background: Received message', request.action);
@@ -12,7 +14,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'ok' });
     return false;
   } else if (request.action === 'logMetric') {
-    // Send metrics to dashboard
     logMetricToDashboard(request.data);
     sendResponse({ success: true });
     return false;
@@ -27,7 +28,12 @@ async function handleTranslateAndExplain(data, sendResponse) {
   
   try {
     // Get API key and settings from storage
-    const result = await chrome.storage.local.get(['openaiApiKey', 'targetLanguage', 'subscriptionTier', 'extensionUserId']);
+    const result = await chrome.storage.local.get([
+      'openaiApiKey', 
+      'targetLanguage', 
+      'subscriptionTier', 
+      'extensionUserId'
+    ]);
     
     const apiKey = result.openaiApiKey;
     const targetLanguage = result.targetLanguage || 'English';
@@ -37,7 +43,8 @@ async function handleTranslateAndExplain(data, sendResponse) {
     console.log('Text Translator Background: Settings loaded', {
       hasApiKey: !!apiKey,
       targetLanguage,
-      tier
+      tier,
+      userId
     });
     
     if (!apiKey) {
@@ -102,7 +109,7 @@ Format your response as:
             content: `Please translate and explain this text: "${data.text}"`
           }
         ],
-        max_tokens: 2000,
+        max_tokens: tier === 'premium' ? 3000 : 2000,
         temperature: 0.7
       }),
       signal: controller.signal
@@ -140,7 +147,7 @@ Format your response as:
     await incrementDailyUsage();
     
     // Log success metric to dashboard
-    logMetricToDashboard({ type: 'success', userId, latency });
+    await logMetricToDashboard({ type: 'success', userId, latency });
     
     sendResponse({ 
       success: true, 
@@ -157,7 +164,7 @@ Format your response as:
     const userId = result.extensionUserId || 'anonymous';
     
     // Log error metric to dashboard
-    logMetricToDashboard({ type: 'error', userId, latency });
+    await logMetricToDashboard({ type: 'error', userId, latency });
     
     let errorMessage = error.message || 'Unknown error occurred';
     
@@ -169,12 +176,12 @@ Format your response as:
   }
 }
 
-// Log metrics to dashboard
+// Log metrics to dashboard with retry
 async function logMetricToDashboard(data) {
   try {
-    const DASHBOARD_URL = 'https://translator-dashboard-three.vercel.app';
+    console.log('📊 Logging metric to dashboard:', data);
     
-    await fetch(`${DASHBOARD_URL}/api/metrics`, {
+    const response = await fetch(`${DASHBOARD_URL}/api/metrics`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -184,8 +191,14 @@ async function logMetricToDashboard(data) {
         timestamp: Date.now()
       })
     });
+
+    if (response.ok) {
+      console.log('✅ Metric logged successfully');
+    } else {
+      console.error('❌ Failed to log metric:', response.status);
+    }
   } catch (error) {
-    console.error('Failed to log metric:', error);
+    console.error('❌ Failed to log metric:', error);
   }
 }
 
@@ -222,6 +235,7 @@ chrome.runtime.onInstalled.addListener((details) => {
       subscriptionTier: 'free',
       extensionUserId: userId
     });
+    console.log('✅ Generated new user ID:', userId);
   }
 });
 
